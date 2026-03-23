@@ -1,0 +1,86 @@
+{
+    "version": "2.0.0",
+    "options": {
+        "env": {
+            "IDF_PATH": "/opt/esp/idf",
+            "IDF_TOOLS_PATH": "/opt/esp/tools",
+            "IDF_PYTHON_ENV_PATH": "/opt/esp/tools/python_env/idf5.5_py3.12_env"
+        }
+    },
+    "tasks": [
+        {
+            "label": "IDF: Build",
+            "type": "process",
+            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
+            "args": ["/opt/esp/idf/tools/idf.py", "build"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": { "kind": "build", "isDefault": true },
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": []
+        },
+        {
+            "label": "IDF: Flash",
+            "type": "process",
+            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
+            "args": ["/opt/esp/idf/tools/idf.py", "-p", "${input:port}", "-b", "115200", "flash"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": []
+        },
+        {
+            "label": "IDF: Flash + Monitor",
+            "type": "process",
+            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
+            "args": ["/opt/esp/idf/tools/idf.py", "-p", "${input:port}", "flash", "monitor"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": []
+        },
+        {
+            "label": "IDF: Monitor",
+            "type": "process",
+            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
+            "args": ["/opt/esp/idf/tools/idf.py", "-p", "${input:port}", "monitor"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": []
+        },
+        {
+            "label": "IDF: Clean",
+            "type": "process",
+            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
+            "args": ["/opt/esp/idf/tools/idf.py", "fullclean"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": []
+        },
+        {
+            "label": "IDF: Set Target",
+            "type": "process",
+            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
+            "args": ["/opt/esp/idf/tools/idf.py", "set-target", "${input:target}"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "port",
+            "type": "pickString",
+            "description": "Selecciona el puerto serial",
+            "options": ["/dev/cu.usbserial-0001", "/dev/cu.usbserial-0002", "/dev/cu.SLAB_USBtoUART", "/dev/cu.usbmodem14101"]
+        },
+        {
+            "id": "target",
+            "type": "pickString",
+            "description": "Selecciona el target",
+            "options": ["esp32c6", "esp32h2", "esp32", "esp32s3", "esp32s2", "esp32c3"]
+        }
+    ]
+}
