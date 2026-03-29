@@ -1,3 +1,3 @@
 idf_component_register(SRCS "main.c"
-                       PRIV_REQUIRES spi_flash
-                       INCLUDE_DIRS "")
+                        INCLUDE_DIRS ""
+                        PRIV_REQUIRES wifi esp_event esp_wifi esp_netif nvs_flash freertos)
