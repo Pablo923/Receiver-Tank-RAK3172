@@ -4,7 +4,6 @@
 #include "esp_wifi.h"
 #include "esp_wifi_netif.h"
 #include "nvs_flash.h"
-
 #include "wifi.h"
 
 // Tag for debug messages
@@ -16,8 +15,8 @@ static EventGroupHandle_t s_wifi_event_group = NULL;
 static wifi_netif_driver_t s_wifi_driver = NULL;
 
 // Settings
-static const uint64_t connection_timeout_ms = 30000;
 EventGroupHandle_t network_event_group;
+static TaskHandle_t s_wifi_task_handle = NULL;
 
 /* Private function prototypes */
 static void on_wifi_event(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data);
@@ -26,11 +25,12 @@ static void on_ip_event(void *arg, esp_event_base_t event_base, int32_t event_id
 
 static void wifi_start(void *esp_netif, esp_event_base_t base, int32_t event_id, void *data);
 
+static void wifi_event_task(void *pvParameters);
+
 /* Private function definitions */
 void wifi_init(void){
 
     esp_err_t esp_ret;
-    EventBits_t network_event_bits;
 
     // Initialize event group
     network_event_group = xEventGroupCreate();
@@ -38,8 +38,7 @@ void wifi_init(void){
     // Initialize NVS: ESP32 WiFi driver uses NVS to store WiFi settings
     // Erase NVS partition if it's out of free space or new version
     esp_ret = nvs_flash_init();
-    if (esp_ret == ESP_ERR_NVS_NO_FREE_PAGES || esp_ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
+    if (esp_ret == ESP_ERR_NVS_NO_FREE_PAGES || esp_ret == ESP_ERR_NVS_NEW_VERSION_FOUND){
         ESP_ERROR_CHECK(nvs_flash_erase());
         esp_ret = nvs_flash_init();
     }
@@ -48,8 +47,7 @@ void wifi_init(void){
         abort();
     }
 
-    // Initialize TCP/IP network interface (only call once in application)
-    // Must be called prior to initializing the network driver!
+    // Initialize TCP/IP network interface
     esp_ret = esp_netif_init();
     if (esp_ret != ESP_OK) {
         ESP_LOGE(TAG, "Error (%d): Failed to initialize network interface", esp_ret);
@@ -71,37 +69,8 @@ void wifi_init(void){
         abort();
     }
 
-    // Wait for network to connect
-    ESP_LOGI(TAG, "Waiting for network to connect...");
-    network_event_bits = xEventGroupWaitBits(network_event_group, 
-                                             WIFI_STA_CONNECTED_BIT, 
-                                             pdFALSE, 
-                                             pdTRUE, 
-                                             pdMS_TO_TICKS(connection_timeout_ms));
-    if (network_event_bits & WIFI_STA_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "Connected to WiFi network");
-    } else {
-        ESP_LOGE(TAG, "Failed to connect to network");
-        // abort();
-        wifi_sta_reconnect();
-    }
-
-    // Wait for IP address
-    ESP_LOGI(TAG, "Waiting for IP address...");
-    network_event_bits = xEventGroupWaitBits(network_event_group, 
-                                             WIFI_STA_IPV4_OBTAINED_BIT | 
-                                                WIFI_STA_IPV6_OBTAINED_BIT, 
-                                             pdFALSE, 
-                                             pdTRUE, 
-                                             pdMS_TO_TICKS(connection_timeout_ms));
-    if (network_event_bits & WIFI_STA_IPV4_OBTAINED_BIT) {
-        ESP_LOGI(TAG, "Connected to IPv4 network");
-    } else if (network_event_bits & WIFI_STA_IPV6_OBTAINED_BIT) {
-        ESP_LOGI(TAG, "Connected to IPv6 network");
-    } else {
-        ESP_LOGE(TAG, "Failed to obtain IP address");
-        abort();
-    }
+    // Private task
+    xTaskCreate(wifi_event_task,"wifi_event_task", 4096, NULL, 5, &s_wifi_task_handle);
 }
 
 // Event handler: WiFi events
@@ -169,6 +138,11 @@ static void on_wifi_event(void *arg,
             // Set WiFi connected bit
             xEventGroupSetBits(s_wifi_event_group, WIFI_STA_CONNECTED_BIT);
 
+            // Notify to task
+            if (s_wifi_task_handle != NULL) {
+                xTaskNotify(s_wifi_task_handle, WIFI_NOTIFY_CONNECTED, eSetValueWithOverwrite);
+            }
+
 #if CONFIG_WIFI_STA_CONNECT_IPV6 || WIFI_STA_CONNECT_UNSPECIFIED
             // Request IPv6 link-local address for the interface
             esp_ret = esp_netif_create_ip6_linklocal(s_wifi_netif);
@@ -187,7 +161,23 @@ static void on_wifi_event(void *arg,
                                               event_data);
             }
             xEventGroupClearBits(s_wifi_event_group, WIFI_STA_CONNECTED_BIT);
-            ESP_LOGI(TAG, "WiFi disconnected");
+
+            // Check reason for disconnection
+            wifi_event_sta_disconnected_t *disconnected = 
+                (wifi_event_sta_disconnected_t *)event_data;
+            
+            if (disconnected->reason == WIFI_REASON_AUTH_FAIL) {
+                ESP_LOGE(TAG, "Authentication failed — wrong password");
+                return;
+            } else if (disconnected->reason == WIFI_REASON_NO_AP_FOUND) {
+                ESP_LOGE(TAG, "AP not found — SSID not available");
+            } else {
+                ESP_LOGW(TAG, "WiFi disconnected, reason: %d", disconnected->reason);
+            }
+            // Notify task
+            if (s_wifi_task_handle != NULL) {
+                xTaskNotify(s_wifi_task_handle, WIFI_NOTIFY_DISCONNECTED, eSetValueWithOverwrite);
+            }
 #if CONFIG_WIFI_STA_AUTO_RECONNECT
             ESP_LOGI(TAG, "Attempting to reconnect...");
             wifi_sta_reconnect();
@@ -231,6 +221,11 @@ static void on_ip_event(void *arg,
 
             // Set connected bit
             xEventGroupSetBits(s_wifi_event_group, WIFI_STA_IPV4_OBTAINED_BIT);
+
+            // Notify task
+            if (s_wifi_task_handle != NULL) {
+                xTaskNotify(s_wifi_task_handle, WIFI_NOTIFY_GOT_IP, eSetValueWithOverwrite);
+            }
 
             // Print IP address
             ip_event_got_ip_t *event_ip = (ip_event_got_ip_t *)event_data;
@@ -611,7 +606,7 @@ esp_err_t wifi_sta_stop(void)
 
     // (s8.1) Disconnect from WiFi
     esp_ret = esp_wifi_disconnect();
-    if (esp_ret == ESP_ERR_WIFI_NOT_INIT || ESP_ERR_WIFI_NOT_STARTED) {
+    if (esp_ret == ESP_ERR_WIFI_NOT_INIT || esp_ret == ESP_ERR_WIFI_NOT_STARTED) {
         ESP_LOGI(TAG, "WiFi already disconnected");
     } else if (esp_ret != ESP_OK) {
         ESP_LOGE(TAG, "Error (%d): Failed to disconnect from WiFi", esp_ret);
@@ -668,19 +663,51 @@ esp_err_t wifi_sta_reconnect(void)
 {
     esp_err_t esp_ret;
 
-    // Stop WiFi
-    esp_ret = wifi_sta_stop();
+    ESP_LOGI(TAG, "Reconnecting to WiFi...");
+    esp_ret = esp_wifi_connect();
     if (esp_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to stop WiFi during reconnect");
+        ESP_LOGE(TAG, "Failed to reconnect: %d", esp_ret);
         return esp_ret;
     }
-
-    // Start WiFi
-    esp_ret = wifi_sta_init(NULL);
-    if (esp_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize WiFi during reconnect");
-        return esp_ret;
-    }
-
     return ESP_OK;
+}
+
+/*** Private task definitions ***/
+
+// task to handle WiFi events and print messages
+static void wifi_event_task(void *pvParameters)
+{
+    uint32_t notification;
+    EventBits_t bits;
+
+    while (1) {
+        // Wait indefinitely for a notification from the WiFi event handler
+        if (xTaskNotifyWait(0, ULONG_MAX, &notification, pdMS_TO_TICKS(30000)) == pdTRUE) {
+            switch (notification) {
+                case WIFI_NOTIFY_CONNECTED:
+                    ESP_LOGI(TAG, "WiFi Connected");
+                    break;
+
+                case WIFI_NOTIFY_DISCONNECTED:
+                    ESP_LOGW(TAG, "WiFi Disconnected — reconnecting...");
+                    wifi_sta_reconnect();
+                    break;
+
+                case WIFI_NOTIFY_GOT_IP:
+                    ESP_LOGI(TAG, "IP Obtained, ready to communicate");
+                    break;
+
+                default:
+                    ESP_LOGW(TAG, "Unknown Notify: %lu", notification);
+                    break;
+            }
+        } else {
+            // Timeout — Check if we are still connected to WiFi
+            bits = xEventGroupGetBits(network_event_group);
+            if (!(bits & WIFI_STA_CONNECTED_BIT)) {
+                ESP_LOGW(TAG, "WiFi no connection — reconnecting...");
+                wifi_sta_reconnect();
+            }
+        }
+    }
 }
