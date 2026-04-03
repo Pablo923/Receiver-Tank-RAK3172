@@ -14,5 +14,5 @@
   },
   "idf.pythonInstallPath": "/Users/pabloolguin/miniconda3/envs/ESP32/bin/python3",
   "idf.flashType": "UART",
-  "idf.port": "/dev/tty.usbmodem11301",
+  "idf.port": "/dev/tty.usbmodem1301",
 }

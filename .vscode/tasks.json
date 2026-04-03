@@ -74,7 +74,7 @@
             "id": "port",
             "type": "pickString",
             "description": "Selecciona el puerto serial",
-            "options": ["/dev/cu.usbserial-0001", "/dev/cu.usbserial-0002", "/dev/cu.SLAB_USBtoUART", "/dev/cu.usbmodem14101"]
+            "options": ["/dev/cu.usbserial-0001", "/dev/cu.usbserial-0002", "/dev/tty.usbmodem1101"]
         },
         {
             "id": "target",
