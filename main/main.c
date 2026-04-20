@@ -6,6 +6,8 @@
 #include "nvs_flash.h"
 #include "wifi.h"
 #include "RAK3172.h"
+#include "freertos/queue.h"
+#include "logger.h"
 
 // Tag for debug messages
 static const char *TAG = "[Receiver]";
@@ -13,11 +15,14 @@ static const char *TAG = "[Receiver]";
 // App entrypoint
 void app_main(void)
 {
+    vLoggerTask_Init(10);
+
     // Initialize WiFi and connect to network
     // wifi_init();
     init_RAK3172();
 
-    ESP_LOGI(TAG, "Running...");
+    // ESP_LOGI(TAG, "Running...");
+    xLoggerTask_Send(TAG, "Running...", portMAX_DELAY);
 
     // Create Task to Print RAK3172 Responses
     xTaskCreate(uartRAK3172_receiveTask, "uartRAK3172_receiveTask", 2048, NULL, 10, NULL);
