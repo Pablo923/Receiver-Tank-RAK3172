@@ -31,19 +31,17 @@ void uartRAK3172_receiveTask(void *pvParameters)
 {
     static const char *TAG_RAK3172 = "[RAK3172] ";
 
-    uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
+    uint8_t data[BUF_SIZE + 1];  // +1 para null terminator
     
     while (1) 
     {
-        int len = uart_read_bytes(UART_RAK3172_NUM, data, BUF_SIZE, 20 / portTICK_PERIOD_MS);
+        int len = uart_read_bytes(UART_RAK3172_NUM, data, BUF_SIZE, pdMS_TO_TICKS(20));
         if (len > 0) 
         {
-            data[len] = 0;  // Null-terminate the received data
+            data[len] = '\0';   // Null-terminate the received data
 
             // Print any Response of RAK3172
             ESP_LOGI(TAG_RAK3172, "%s", data);
         }   
     }
-    free(data);
-    vTaskDelay(pdMS_TO_TICKS(10));
 }

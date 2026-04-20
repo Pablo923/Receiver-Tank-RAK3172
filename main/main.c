@@ -25,7 +25,7 @@ void app_main(void)
     xLoggerTask_Send(TAG, "Running...", portMAX_DELAY);
 
     // Create Task to Print RAK3172 Responses
-    xTaskCreate(uartRAK3172_receiveTask, "uartRAK3172_receiveTask", 2048, NULL, 10, NULL);
+    xTaskCreate(uartRAK3172_receiveTask, "uartRAK3172_receiveTask", 4096, NULL, 10, NULL);
     
     // Set RAK3172 as Receiver
     RAK3172_sendCommand("AT+PRECV=65534");
