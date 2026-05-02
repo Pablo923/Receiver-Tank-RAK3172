@@ -19,20 +19,14 @@ void app_main(void)
 
     // Initialize WiFi and connect to network
     // wifi_init();
-    init_RAK3172();
+    RAK3172_Init();
 
     // ESP_LOGI(TAG, "Running...");
     xLoggerTask_Send(TAG, "Running...", portMAX_DELAY);
 
     // Create Task to Print RAK3172 Responses
-    xTaskCreate(uartRAK3172_receiveTask, "uartRAK3172_receiveTask", 4096, NULL, 10, NULL);
+    xTaskCreate(vRAK3172ReceiveTask, "RAK3172_RX", 4096, NULL, 10, NULL);
     
     // Set RAK3172 as Receiver
-    RAK3172_sendCommand("AT+PRECV=65534");
-    vTaskDelay(1000 / portTICK_PERIOD_MS); 
-
-    while(1) 
-    {
-        vTaskDelay(1000 / portTICK_PERIOD_MS); 
-    }
+    RAK3172_SendCommand("AT+PRECV=65534");
 }
