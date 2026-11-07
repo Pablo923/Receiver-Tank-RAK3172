@@ -1,10 +1,24 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "string.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 #include "esp_log.h"
+#include <stdbool.h>
+#include <stdio.h>
+#include "string.h"
 #include "RAK3172.h"
 
 #define LINE_BUFFER_SIZE 128
+
+static const char *TAG_RAK3172 = "[RAK3172]";
+static QueueHandle_t xMessageQueue = NULL;
+
+static inline int8_t parseSignedInt8(const char **p);
+static inline int hexCharToNibble(char c);
+static bool parseRxMetadata(const char *line, int8_t *rssi, int8_t *snr);
+static int decodePayload(const char *hex, RAK3172_Message_t *msg, int8_t rssi, int8_t snr);
+
+/* PUBLIC FUNCTIONS */
 
 void RAK3172_Init(void) {
     const uart_config_t uart_config = {
@@ -20,40 +34,75 @@ void RAK3172_Init(void) {
     uart_driver_install(UART_RAK3172_NUM, BUF_SIZE * 2, 0, 0, NULL, 0);
     uart_param_config(UART_RAK3172_NUM, &uart_config);
     uart_set_pin(UART_RAK3172_NUM, RAK3172_TXD_PIN, RAK3172_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
+    // Create queue for received messages
+    xMessageQueue = xQueueCreate(10, sizeof(RAK3172_Message_t));
+    configASSERT(xMessageQueue);
+}
+
+void RAK3172_StartReceiver(void)
+{
+    char command[48];
+
+    // P2P mode and radio parameters must match the transmitter.
+    RAK3172_SendCommand("AT+NWM=0");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // Stop RX before changing P2P parameters.
+    RAK3172_SendCommand("AT+PRECV=0");
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    snprintf(command, sizeof(command), "AT+P2P=%s", RAK3172_P2P_CONFIG);
+    RAK3172_SendCommand(command);
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    RAK3172_SendCommand("AT+PRECV=65534");
 }
 
 void RAK3172_SendCommand(const char* command)
 {
+    ESP_LOGI(TAG_RAK3172, "AT -> %s", command);
     uart_write_bytes(UART_RAK3172_NUM, command, strlen(command));
     uart_write_bytes(UART_RAK3172_NUM, "\r\n", 2);
 }
 
-// void uartRAK3172_receiveTask(void *pvParameters)
-// {
-//     static const char *TAG_RAK3172 = "[RAK3172] ";
+int RAK3172_DecoderRx(const char *s, RAK3172_Message_t *msg)
+{
+    if (!s || !msg) return -1;
 
-//     uint8_t data[BUF_SIZE + 1]; // +1 for null-termination
-    
-//     while (1) 
-//     {
-//         int len = uart_read_bytes(UART_RAK3172_NUM, data, BUF_SIZE, pdMS_TO_TICKS(20));
-//         if (len > 0) 
-//         {
-//             data[len] = '\0';   // Null-terminate the received data
+    const char *prefix = "+EVT:RXP2P:";
+    if (strncmp(s, prefix, strlen(prefix)) != 0) return -1;
+    const char *p = s + strlen(prefix);
 
-//             // Print any Response of RAK3172
-//             ESP_LOGI(TAG_RAK3172, "%s", data);
-//         }   
-//     }
-// }
+    // RSSI
+    if (*p != '-' && (*p < '0' || *p > '9')) return -1;
+    msg->rssi = parseSignedInt8(&p);
+    if (*p++ != ':') return -1;
+
+    // SNR
+    if (*p != '-' && (*p < '0' || *p > '9')) return -1;
+    msg->snr = parseSignedInt8(&p);
+    if (*p++ != ':') return -1;
+
+    return decodePayload(p, msg, msg->rssi, msg->snr);
+}
+
+// Function to dequeue messages from the RAK3172 message from out
+BaseType_t RAK3172_DequeueMessage(RAK3172_Message_t *pxMessage, TickType_t xTicksToWait)
+{
+    return xQueueReceive(xMessageQueue, pxMessage, xTicksToWait);
+}
+
+/* TASKS */
 
 void vRAK3172ReceiveTask(void *pvParameters)
 {
-    static const char *TAG_RAK3172 = "[RAK3172] ";
-
     uint8_t rx[BUF_SIZE];
     char line[LINE_BUFFER_SIZE];
     uint16_t idx = 0;
+    bool have_rx_metadata = false;
+    int8_t rx_rssi = 0;
+    int8_t rx_snr = 0;
 
     RAK3172_Message_t msg;
     
@@ -71,10 +120,29 @@ void vRAK3172ReceiveTask(void *pvParameters)
             if (c == '\n')
             {
                 line[idx] = '\0';
+                if (idx > 0) ESP_LOGI(TAG_RAK3172, "UART <- %s", line);
 
-                if (RAK3172_DecoderRx(line, &msg) == 0)
+                if (parseRxMetadata(line, &rx_rssi, &rx_snr))
                 {
-                    ESP_LOGI(TAG_RAK3172,"ID=%u RSSI=%d SNR=%d Level=%.2f litros", msg.device_id, msg.rssi, msg.snr, msg.level);
+                    have_rx_metadata = true;
+                }
+                else if (strncmp(line, "+EVT:", 5) == 0 &&
+                         decodePayload(line + 5, &msg,
+                                       have_rx_metadata ? rx_rssi : 0,
+                                       have_rx_metadata ? rx_snr : 0) == 0)
+                {
+                    if (xQueueSend(xMessageQueue, &msg, 0) != pdPASS)
+                    {
+                        ESP_LOGW(TAG_RAK3172, "Message queue full; dropping packet");
+                    }
+                    have_rx_metadata = false;
+                }
+                else if (RAK3172_DecoderRx(line, &msg) == 0)
+                {
+                    if (xQueueSend(xMessageQueue, &msg, 0) != pdPASS)
+                    {
+                        ESP_LOGW(TAG_RAK3172, "Message queue full; dropping packet");
+                    }
                 }
 
                 idx = 0;
@@ -88,11 +156,14 @@ void vRAK3172ReceiveTask(void *pvParameters)
             }
             else
             {
+                ESP_LOGW(TAG_RAK3172, "UART line too long; discarding it");
                 idx = 0;
             }
         }
     }
     }
+
+/* PRIVATE FUNCTIONS */
 
 /*
  * Parses an integer from a string, handling optional leading '-' for negative numbers.
@@ -128,50 +199,40 @@ static inline int hexCharToNibble(char c)
     return -1;
 }
 
-int RAK3172_DecoderRx(const char *s, RAK3172_Message_t *msg)
+static bool parseRxMetadata(const char *line, int8_t *rssi, int8_t *snr)
 {
-    if (!s || !msg) return -1;
+    const char *prefix = "+EVT:RXP2P, RSSI ";
+    if (strncmp(line, prefix, strlen(prefix)) != 0) return false;
 
-    const char *prefix = "+EVT:RXP2P:";
-    for (int i = 0; prefix[i]; i++) {
-        if (s[i] != prefix[i]) return -1;
-    }
+    const char *p = line + strlen(prefix);
+    if (*p != '-' && (*p < '0' || *p > '9')) return false;
+    *rssi = parseSignedInt8(&p);
 
-    const char *p = s + 12;
+    const char *snr_prefix = ", SNR ";
+    if (strncmp(p, snr_prefix, strlen(snr_prefix)) != 0) return false;
+    p += strlen(snr_prefix);
 
-    // RSSI
-    msg->rssi = parseSignedInt8(&p);
-    if (*p++ != ':') return -1;
+    if (*p != '-' && (*p < '0' || *p > '9')) return false;
+    *snr = parseSignedInt8(&p);
+    return *p == '\0';
+}
 
-    // SNR
-    msg->snr = parseSignedInt8(&p);
-    if (*p++ != ':') return -1;
+static int decodePayload(const char *hex, RAK3172_Message_t *msg, int8_t rssi, int8_t snr)
+{
+    if (!hex || !msg || strlen(hex) != 8) return -1;
 
-    // device_id (2 hex chars = 1 byte)
-    int hi = hexCharToNibble(*p++);
-    int lo = hexCharToNibble(*p++);
-
-    if (hi < 0 || lo < 0) return -1;
-
-    msg->device_id = (uint8_t)((hi << 4) | lo);
-
-    // level (8 hex chars = 4 bytes)
     uint8_t float_bytes[4];
-
     for (int i = 0; i < 4; i++)
     {
-        hi = hexCharToNibble(*p++);
-        lo = hexCharToNibble(*p++);
-
+        int hi = hexCharToNibble(hex[i * 2]);
+        int lo = hexCharToNibble(hex[i * 2 + 1]);
         if (hi < 0 || lo < 0) return -1;
-
         float_bytes[i] = (uint8_t)((hi << 4) | lo);
     }
 
-    memcpy(&msg->level, float_bytes, sizeof(float));
-
-    // total payload bytes parseados
-    msg->length = 5;
-
+    memcpy(&msg->level, float_bytes, sizeof(msg->level));
+    msg->length = sizeof(float_bytes);
+    msg->rssi = rssi;
+    msg->snr = snr;
     return 0;
 }
