@@ -1,0 +1,20 @@
+[
+    {
+        "key": "f16",
+        "command": "workbench.action.tasks.runTask",
+        "args": "IDF: Build",
+        "when": "workspaceFolderCount > 0"
+    },
+    {
+        "key": "f17",
+        "command": "workbench.action.tasks.runTask",
+        "args": "IDF: Flash",
+        "when": "workspaceFolderCount > 0"
+    },
+    {
+        "key": "f18",
+        "command": "workbench.action.tasks.runTask",
+        "args": "IDF: Monitor",
+        "when": "workspaceFolderCount > 0"
+    }
+]

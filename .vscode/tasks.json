@@ -1,18 +1,11 @@
 {
     "version": "2.0.0",
-    "options": {
-        "env": {
-            "IDF_PATH": "/opt/esp/idf",
-            "IDF_TOOLS_PATH": "/opt/esp/tools",
-            "IDF_PYTHON_ENV_PATH": "/opt/esp/tools/python_env/idf5.5_py3.12_env"
-        }
-    },
     "tasks": [
         {
             "label": "IDF: Build",
-            "type": "process",
-            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
-            "args": ["/opt/esp/idf/tools/idf.py", "build"],
+            "type": "shell",
+            "command": "make",
+            "args": ["build"],
             "options": { "cwd": "${workspaceFolder}" },
             "group": { "kind": "build", "isDefault": true },
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -20,9 +13,9 @@
         },
         {
             "label": "IDF: Flash",
-            "type": "process",
-            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
-            "args": ["/opt/esp/idf/tools/idf.py", "-p", "${input:port}", "-b", "115200", "flash"],
+            "type": "shell",
+            "command": "make",
+            "args": ["flash", "PORT=${config:idf.port}"],
             "options": { "cwd": "${workspaceFolder}" },
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -30,9 +23,9 @@
         },
         {
             "label": "IDF: Flash + Monitor",
-            "type": "process",
-            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
-            "args": ["/opt/esp/idf/tools/idf.py", "-p", "${input:port}", "flash", "monitor"],
+            "type": "shell",
+            "command": "make",
+            "args": ["flash-monitor", "PORT=${config:idf.port}"],
             "options": { "cwd": "${workspaceFolder}" },
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -40,9 +33,9 @@
         },
         {
             "label": "IDF: Monitor",
-            "type": "process",
-            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
-            "args": ["/opt/esp/idf/tools/idf.py", "-p", "${input:port}", "monitor"],
+            "type": "shell",
+            "command": "make",
+            "args": ["monitor", "PORT=${config:idf.port}"],
             "options": { "cwd": "${workspaceFolder}" },
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -50,9 +43,9 @@
         },
         {
             "label": "IDF: Clean",
-            "type": "process",
-            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
-            "args": ["/opt/esp/idf/tools/idf.py", "fullclean"],
+            "type": "shell",
+            "command": "make",
+            "args": ["clean"],
             "options": { "cwd": "${workspaceFolder}" },
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -60,9 +53,9 @@
         },
         {
             "label": "IDF: Set Target",
-            "type": "process",
-            "command": "/opt/esp/tools/python_env/idf5.5_py3.12_env/bin/python",
-            "args": ["/opt/esp/idf/tools/idf.py", "set-target", "${input:target}"],
+            "type": "shell",
+            "command": "make",
+            "args": ["set-target", "IDF_TARGET=${input:target}"],
             "options": { "cwd": "${workspaceFolder}" },
             "group": "build",
             "presentation": { "reveal": "always", "panel": "shared" },
@@ -70,12 +63,6 @@
         }
     ],
     "inputs": [
-        {
-            "id": "port",
-            "type": "pickString",
-            "description": "Selecciona el puerto serial",
-            "options": ["/dev/cu.usbserial-0001", "/dev/cu.usbserial-0002", "/dev/tty.usbmodem1101"]
-        },
         {
             "id": "target",
             "type": "pickString",
