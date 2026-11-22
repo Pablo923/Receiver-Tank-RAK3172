@@ -219,19 +219,42 @@ static bool parseRxMetadata(const char *line, int8_t *rssi, int8_t *snr)
 
 static int decodePayload(const char *hex, RAK3172_Message_t *msg, int8_t rssi, int8_t snr)
 {
-    if (!hex || !msg || strlen(hex) != 8) return -1;
+    if (!hex || !msg) return -1;
 
-    uint8_t float_bytes[4];
-    for (int i = 0; i < 4; i++)
+    size_t hex_len = strlen(hex);
+    if (hex_len != RAK3172_PAYLOAD_SIZE * 2 && hex_len != RAK3172_PAYLOAD_LEGACY_SIZE * 2) return -1;
+
+    uint8_t bytes[RAK3172_PAYLOAD_SIZE];
+    size_t n_bytes = hex_len / 2;
+    for (size_t i = 0; i < n_bytes; i++)
     {
         int hi = hexCharToNibble(hex[i * 2]);
         int lo = hexCharToNibble(hex[i * 2 + 1]);
         if (hi < 0 || lo < 0) return -1;
-        float_bytes[i] = (uint8_t)((hi << 4) | lo);
+        bytes[i] = (uint8_t)((hi << 4) | lo);
     }
 
-    memcpy(&msg->level, float_bytes, sizeof(msg->level));
-    msg->length = sizeof(float_bytes);
+    // Level offset: byte 1 in the 9-byte payload, byte 0 in the legacy one
+    const uint8_t *level_bytes = bytes;
+    msg->device_id = 0;
+    msg->temperature_c100 = RAK3172_TEMPERATURE_NO_DATA;
+    msg->humidity_rh100 = RAK3172_HUMIDITY_NO_DATA;
+
+    if (n_bytes == RAK3172_PAYLOAD_SIZE)
+    {
+        msg->device_id = bytes[0];
+        level_bytes = &bytes[1];
+        msg->temperature_c100 = (int16_t)((uint16_t)bytes[5] | ((uint16_t)bytes[6] << 8));
+        msg->humidity_rh100 = (uint16_t)bytes[7] | ((uint16_t)bytes[8] << 8);
+    }
+
+    uint32_t level_bits = (uint32_t)level_bytes[0] |
+                          ((uint32_t)level_bytes[1] << 8) |
+                          ((uint32_t)level_bytes[2] << 16) |
+                          ((uint32_t)level_bytes[3] << 24);
+    memcpy(&msg->level, &level_bits, sizeof(msg->level));
+
+    msg->length = (uint8_t)n_bytes;
     msg->rssi = rssi;
     msg->snr = snr;
     return 0;

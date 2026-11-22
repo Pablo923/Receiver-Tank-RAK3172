@@ -9,10 +9,14 @@
 #define MQTT_STATE_TOPIC       "estanque/nivel/state"
 #define MQTT_RSSI_STATE_TOPIC  "estanque/rssi/state"
 #define MQTT_SNR_STATE_TOPIC   "estanque/snr/state"
+#define MQTT_TEMPERATURE_STATE_TOPIC "estanque/temperatura/state"
+#define MQTT_HUMIDITY_STATE_TOPIC    "estanque/humedad/state"
 #define MQTT_AVAILABILITY_TOPIC "estanque/nivel/status"
 #define HA_DISCOVERY_TOPIC     "homeassistant/sensor/receiver_tank_rak3172/nivel/config"
 #define HA_RSSI_DISCOVERY_TOPIC "homeassistant/sensor/receiver_tank_rak3172/rssi/config"
 #define HA_SNR_DISCOVERY_TOPIC  "homeassistant/sensor/receiver_tank_rak3172/snr/config"
+#define HA_TEMPERATURE_DISCOVERY_TOPIC "homeassistant/sensor/receiver_tank_rak3172/temperatura/config"
+#define HA_HUMIDITY_DISCOVERY_TOPIC    "homeassistant/sensor/receiver_tank_rak3172/humedad/config"
 
 static const char *TAG = "[HA_MQTT]";
 static esp_mqtt_client_handle_t s_mqtt_client;
@@ -69,6 +73,42 @@ static const char s_snr_discovery_payload[] =
         "\"model\":\"ESP32-C6 + RAK3172\""
     "}}";
 
+static const char s_temperature_discovery_payload[] =
+    "{\"name\":\"Temperatura\","
+    "\"unique_id\":\"receiver_tank_temperature\","
+    "\"state_topic\":\"" MQTT_TEMPERATURE_STATE_TOPIC "\","
+    "\"availability_topic\":\"" MQTT_AVAILABILITY_TOPIC "\","
+    "\"payload_available\":\"online\","
+    "\"payload_not_available\":\"offline\","
+    "\"device_class\":\"temperature\","
+    "\"unit_of_measurement\":\"°C\","
+    "\"state_class\":\"measurement\","
+    "\"suggested_display_precision\":1,"
+    "\"device\":{"
+        "\"identifiers\":[\"receiver_tank_rak3172\"],"
+        "\"name\":\"Receptor del estanque\","
+        "\"manufacturer\":\"Espressif\","
+        "\"model\":\"ESP32-C6 + RAK3172\""
+    "}}";
+
+static const char s_humidity_discovery_payload[] =
+    "{\"name\":\"Humedad\","
+    "\"unique_id\":\"receiver_tank_humidity\","
+    "\"state_topic\":\"" MQTT_HUMIDITY_STATE_TOPIC "\","
+    "\"availability_topic\":\"" MQTT_AVAILABILITY_TOPIC "\","
+    "\"payload_available\":\"online\","
+    "\"payload_not_available\":\"offline\","
+    "\"device_class\":\"humidity\","
+    "\"unit_of_measurement\":\"%\","
+    "\"state_class\":\"measurement\","
+    "\"suggested_display_precision\":0,"
+    "\"device\":{"
+        "\"identifiers\":[\"receiver_tank_rak3172\"],"
+        "\"name\":\"Receptor del estanque\","
+        "\"manufacturer\":\"Espressif\","
+        "\"model\":\"ESP32-C6 + RAK3172\""
+    "}}";
+
 static void enqueue_message(const char *topic, const char *payload, int qos)
 {
     int message_id = esp_mqtt_client_enqueue(
@@ -95,6 +135,8 @@ static void mqtt_event_handler(void *handler_args,
         enqueue_message(HA_DISCOVERY_TOPIC, s_discovery_payload, 1);
         enqueue_message(HA_RSSI_DISCOVERY_TOPIC, s_rssi_discovery_payload, 1);
         enqueue_message(HA_SNR_DISCOVERY_TOPIC, s_snr_discovery_payload, 1);
+        enqueue_message(HA_TEMPERATURE_DISCOVERY_TOPIC, s_temperature_discovery_payload, 1);
+        enqueue_message(HA_HUMIDITY_DISCOVERY_TOPIC, s_humidity_discovery_payload, 1);
         enqueue_message(MQTT_AVAILABILITY_TOPIC, "online", 1);
         break;
 
@@ -148,33 +190,32 @@ esp_err_t homeassistant_mqtt_start(void)
     return err;
 }
 
-void homeassistant_mqtt_publish_measurements(float level_liters, int rssi_dbm, int snr_db)
+static void publish_value(const char *topic, const char *format, double value)
 {
-    if (!s_mqtt_connected || s_mqtt_client == NULL) {
-        return;
-    }
-
     char payload[24];
-    int length = snprintf(payload, sizeof(payload), "%.2f", (double)level_liters);
-    if (length < 0 || (size_t)length >= sizeof(payload)) {
-        ESP_LOGE(TAG, "Failed to format tank level MQTT payload");
+    int length = snprintf(payload, sizeof(payload), format, value);
+    if (length > 0 && (size_t)length < sizeof(payload)) {
+        enqueue_message(topic, payload, 1);
+    } else {
+        ESP_LOGE(TAG, "Failed to format MQTT payload for topic %s", topic);
+    }
+}
+
+void homeassistant_mqtt_publish_measurements(const RAK3172_Message_t *msg)
+{
+    if (!s_mqtt_connected || s_mqtt_client == NULL || msg == NULL) {
         return;
     }
 
-    enqueue_message(MQTT_STATE_TOPIC, payload, 1);
+    publish_value(MQTT_STATE_TOPIC, "%.2f", msg->level);
+    publish_value(MQTT_RSSI_STATE_TOPIC, "%.0f", msg->rssi);
+    publish_value(MQTT_SNR_STATE_TOPIC, "%.0f", msg->snr);
 
-    char radio_payload[12];
-    length = snprintf(radio_payload, sizeof(radio_payload), "%d", rssi_dbm);
-    if (length > 0 && (size_t)length < sizeof(radio_payload)) {
-        enqueue_message(MQTT_RSSI_STATE_TOPIC, radio_payload, 1);
-    } else {
-        ESP_LOGE(TAG, "Failed to format RSSI MQTT payload");
+    // Skip the "no data" markers so Home Assistant keeps the last valid reading
+    if (msg->temperature_c100 != RAK3172_TEMPERATURE_NO_DATA) {
+        publish_value(MQTT_TEMPERATURE_STATE_TOPIC, "%.2f", msg->temperature_c100 / 100.0);
     }
-
-    length = snprintf(radio_payload, sizeof(radio_payload), "%d", snr_db);
-    if (length > 0 && (size_t)length < sizeof(radio_payload)) {
-        enqueue_message(MQTT_SNR_STATE_TOPIC, radio_payload, 1);
-    } else {
-        ESP_LOGE(TAG, "Failed to format SNR MQTT payload");
+    if (msg->humidity_rh100 != RAK3172_HUMIDITY_NO_DATA) {
+        publish_value(MQTT_HUMIDITY_STATE_TOPIC, "%.2f", msg->humidity_rh100 / 100.0);
     }
 }

@@ -1,3 +1,4 @@
+#include <math.h>
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -69,8 +70,11 @@ void vMessageProcessTask(void *pvParameters)
         if (RAK3172_DequeueMessage(&msg, portMAX_DELAY) == pdPASS)
         {
             // Only for test
-            ESP_LOGI("[MAIN]", "RSSI=%d SNR=%d Level=%.2f", msg.rssi, msg.snr, msg.level);
-            homeassistant_mqtt_publish_measurements(msg.level, msg.rssi, msg.snr);
+            ESP_LOGI("[MAIN]", "ID=%u RSSI=%d SNR=%d Level=%.2f Temp=%.2f Hum=%.2f",
+                     msg.device_id, msg.rssi, msg.snr, msg.level,
+                     msg.temperature_c100 == RAK3172_TEMPERATURE_NO_DATA ? NAN : msg.temperature_c100 / 100.0,
+                     msg.humidity_rh100 == RAK3172_HUMIDITY_NO_DATA ? NAN : msg.humidity_rh100 / 100.0);
+            homeassistant_mqtt_publish_measurements(&msg);
         }
     }
 }
