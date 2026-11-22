@@ -6,6 +6,15 @@
 #include "nvs_flash.h"
 #include "wifi.h"
 
+#if __has_include("wifi_credentials.local.h")
+#include "wifi_credentials.local.h"
+#define WIFI_SSID_VALUE     WIFI_LOCAL_SSID
+#define WIFI_PASSWORD_VALUE WIFI_LOCAL_PASSWORD
+#else
+#define WIFI_SSID_VALUE     CONFIG_WIFI_STA_SSID
+#define WIFI_PASSWORD_VALUE CONFIG_WIFI_STA_PASSWORD
+#endif
+
 // Tag for debug messages
 static const char *TAG = "[WIFI]";
 
@@ -331,7 +340,7 @@ static void wifi_start(void *esp_netif,
     esp_netif_action_start(esp_netif, base, event_id, data);
 
     // (s3.3) Connect to WiFi
-    ESP_LOGI(TAG, "Connecting to %s...", CONFIG_WIFI_STA_SSID);
+    ESP_LOGI(TAG, "Connecting to %s...", WIFI_SSID_VALUE);
     esp_ret = esp_wifi_connect();
     if (esp_ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to connect to WiFi");
@@ -504,8 +513,8 @@ esp_err_t wifi_sta_init(EventGroupHandle_t event_group)
     // using a provisioning app to set up the device
     wifi_config_t wifi_config = {
         .sta = {
-            .ssid = CONFIG_WIFI_STA_SSID,
-            .password = CONFIG_WIFI_STA_PASSWORD,
+            .ssid = WIFI_SSID_VALUE,
+            .password = WIFI_PASSWORD_VALUE,
             .threshold.authmode = auth_mode,
             .sae_pwe_h2e = sae_pwe_method,
             .sae_h2e_identifier = CONFIG_WIFI_STA_WPA3_PASSWORD_ID,

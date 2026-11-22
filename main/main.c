@@ -1,28 +1,48 @@
-#include <string.h>
-#include "esp_event.h"
 #include "esp_log.h"
-#include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
-#include "nvs_flash.h"
+#include "freertos/event_groups.h"
 #include "wifi.h"
 #include "RAK3172.h"
-#include "freertos/queue.h"
 #include "logger.h"
+#include "homeassistant_mqtt.h"
 
 TaskHandle_t xRAK3172ReceiveTaskHandle;
 
 void vMessageProcessTask(void *pvParameters);
 
-// Tag for debug messages
 static const char *TAG = "[Receiver]";
+
+static void vHomeAssistantMqttTask(void *pvParameters)
+{
+    (void)pvParameters;
+
+    EventBits_t bits = xEventGroupWaitBits(
+        network_event_group,
+        WIFI_STA_IPV4_OBTAINED_BIT,
+        pdFALSE,
+        pdTRUE,
+        portMAX_DELAY);
+
+    if ((bits & WIFI_STA_IPV4_OBTAINED_BIT) != 0) {
+        esp_err_t err = homeassistant_mqtt_start();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Could not start Home Assistant MQTT client: %s", esp_err_to_name(err));
+        }
+    }
+
+    vTaskDelete(NULL);
+}
 
 // App entrypoint
 void app_main(void)
 {
     vLoggerTask_Init(10);
 
-    // Initialize WiFi and connect to network
-    // wifi_init();
+#if CONFIG_HA_MQTT_ENABLE
+    wifi_init();
+    xTaskCreate(vHomeAssistantMqttTask, "HA_MQTT", 4096, NULL, 5, NULL);
+#endif
+
     RAK3172_Init();
 
     // ESP_LOGI(TAG, "Running...");
@@ -50,6 +70,7 @@ void vMessageProcessTask(void *pvParameters)
         {
             // Only for test
             ESP_LOGI("[MAIN]", "RSSI=%d SNR=%d Level=%.2f", msg.rssi, msg.snr, msg.level);
+            homeassistant_mqtt_publish_measurements(msg.level, msg.rssi, msg.snr);
         }
     }
 }

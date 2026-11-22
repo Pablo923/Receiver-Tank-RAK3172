@@ -1,0 +1,18 @@
+menu "Home Assistant MQTT Configuration"
+
+    config HA_MQTT_ENABLE
+        bool "Publish tank level to Home Assistant"
+        depends on WIFI_STA_CONNECT_IPV4
+        select WIFI_STA_AUTO_RECONNECT
+        default y
+        help
+            Publishes the received tank level to an MQTT broker and registers
+            the sensor in Home Assistant using MQTT discovery.
+
+    config HA_MQTT_BROKER_URI
+        string "MQTT broker URI"
+        default "mqtt://192.168.1.224:1883"
+        help
+            Broker URI, for example mqtt://192.168.1.224:1883.
+
+endmenu
