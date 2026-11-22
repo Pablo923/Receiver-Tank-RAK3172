@@ -4,3 +4,4 @@ build
 sdkconfig.defaults
 sdkconfig.old
 sdkconfig
+components/wifi/include/wifi_credentials.local.h

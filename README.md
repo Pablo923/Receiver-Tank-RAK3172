@@ -6,7 +6,11 @@ Before compilation, copy template and add own credentials:
 cp sdkconfig.defaults.template sdkconfig.defaults
 ```
 
-Edit `sdkconfig.defaults` in `CONFIG_WIFI_STA_SSID` and `CONFIG_WIFI_STA_PASSWORD` with own SSID and password.
+Copy `components/wifi/include/wifi_credentials.local.h.example` to
+`components/wifi/include/wifi_credentials.local.h` and set `WIFI_LOCAL_SSID`
+and `WIFI_LOCAL_PASSWORD` there. The local file is ignored by Git. The Wi-Fi
+component uses it when present and falls back to the ESP-IDF Kconfig values if
+it is absent.
 
 ## VS Code shortcuts
 
